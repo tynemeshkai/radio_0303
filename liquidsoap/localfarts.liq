@@ -188,27 +188,7 @@ requests = request.queue()
 autodj = fallback(track_sensitive=true, [requests, radio_source])
 
 # ==============================================================================
-# 5. ENERGY-BASED SMART CROSSFADE
-# ==============================================================================
-# Вместо фиксированного crossfade(duration=3.5) используем cross() с кастомной
-# функцией, которая анализирует db_level и liq_amplify для принятия решений.
-#
-# Логика:
-#   - Autocue уже проставляет liq_cross_duration, liq_fade_in, liq_fade_out
-#     на каждый трек → Liquidsoap подхватывает их автоматически
-#   - Мы добавляем cross.smart, который дополнительно анализирует db_level
-#     (реальный RMS-уровень на стыке) и выбирает тип перехода:
-#
-#   1. Оба тихие + похожие → полный crossfade (fade-in + fade-out)
-#   2. Новый сильно громче  → только fade-out старого (не глушим энергичное начало)
-#   3. Старый сильно громче → только fade-in нового (не обрубаем мощный финал)
-#   4. Оба громкие / разница слишком велика → hard cut (наложение замажет оба)
-#
-# Джинглы: liq_cross_duration=0.1 уже аннотирован в плейлисте jingles,
-#          cross.smart при duration <0.5 делает simple sequence.
-#
-# Порог high=-15 dB, medium=-32 dB, margin=4 dB — это дефолты cross.smart,
-# протестированные годами в Liquidsoap. Не трогаем без причины.
+# 5. ENERGY-BASED SMART CROSSFADE TEST
 # ==============================================================================
 
 def energy_crossfade(old, new) =
@@ -268,17 +248,18 @@ def energy_crossfade(old, new) =
         fade.in(type="exp", duration=1.0, new.source)
       ])
     else
-      # mid→mid, mid→calm, mid→hot и т.д. → стандартный cross.smart
-      # Он сам разберётся по db_level
-      log("[CrossFade] mixed energy → delegating to cross.smart")
-      cross.smart(fade_in=2.5, fade_out=3.0, old, new)
-    end
+      # mid→mid, mid→calm, mid→hot — стандартный crossfade
+      log("[CrossFade] mixed energy → standard crossfade (fade_in=2.5, fade_out=3.0)")
+      add(normalize=false, [
+        fade.out(type="sin", duration=3.0, old.source),
+        fade.in(type="sin", duration=2.5, new.source)
+      ])
+    end  
   end
 end
 
 autodj = cross(
-  duration=5.0,    # Буфер: макс 5 секунд (должен покрывать самый длинный фейд)
-  minimum=0.0,     # Разрешаем crossfade даже для коротких остатков
+  duration=5.0,
   energy_crossfade,
   autodj
 )
