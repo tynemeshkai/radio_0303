@@ -1,0 +1,22 @@
+[Unit]
+Description=HLS Slicer for Local Farts Radio
+# Важно: эта служба запустится ТОЛЬКО после того, как сеть и само радио будут готовы
+After=network.target localfarts.service
+# Если радио упадет, нарезка тоже должна остановиться (опционально, но логично)
+BindsTo=localfarts.service
+
+[Service]
+Type=simple
+# Запускаем наш скрипт
+ExecStart=/usr/local/bin/hls-slicer
+
+# Если FFmpeg вылетит (ошибка потока), перезапустить его через 5 секунд
+Restart=always
+RestartSec=5
+
+# Работаем от root, чтобы иметь полный доступ к /dev/shm (это RAM-диск)
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
