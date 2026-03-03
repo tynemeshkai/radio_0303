@@ -188,18 +188,100 @@ requests = request.queue()
 autodj = fallback(track_sensitive=true, [requests, radio_source])
 
 # ==============================================================================
-# 5. SMART CROSSFADE
+# 5. ENERGY-BASED SMART CROSSFADE
 # ==============================================================================
-def smart_crossfade_logic(s) =
-  crossfade(
-    duration=3.5,
-    fade_in=1.5,
-    fade_out=3.0,
-    s
-  )
+# Вместо фиксированного crossfade(duration=3.5) используем cross() с кастомной
+# функцией, которая анализирует db_level и liq_amplify для принятия решений.
+#
+# Логика:
+#   - Autocue уже проставляет liq_cross_duration, liq_fade_in, liq_fade_out
+#     на каждый трек → Liquidsoap подхватывает их автоматически
+#   - Мы добавляем cross.smart, который дополнительно анализирует db_level
+#     (реальный RMS-уровень на стыке) и выбирает тип перехода:
+#
+#   1. Оба тихие + похожие → полный crossfade (fade-in + fade-out)
+#   2. Новый сильно громче  → только fade-out старого (не глушим энергичное начало)
+#   3. Старый сильно громче → только fade-in нового (не обрубаем мощный финал)
+#   4. Оба громкие / разница слишком велика → hard cut (наложение замажет оба)
+#
+# Джинглы: liq_cross_duration=0.1 уже аннотирован в плейлисте jingles,
+#          cross.smart при duration <0.5 делает simple sequence.
+#
+# Порог high=-15 dB, medium=-32 dB, margin=4 dB — это дефолты cross.smart,
+# протестированные годами в Liquidsoap. Не трогаем без причины.
+# ==============================================================================
+
+def energy_crossfade(old, new) =
+  # Читаем liq_amplify из autocue — это "сколько dB добавить чтобы дотянуть до -16 LUFS"
+  # Чем БОЛЬШЕ liq_amplify, тем ТИШЕ оригинал → спокойный трек
+  # Чем МЕНЬШЕ (или отрицательное), тем ГРОМЧЕ оригинал → энергичный трек
+  old_amplify = float_of_string(default=0.0, old.metadata["liq_amplify"] ?? "0")
+  new_amplify = float_of_string(default=0.0, new.metadata["liq_amplify"] ?? "0")
+
+  old_is_jingle = (old.metadata["is_jingle"] ?? "false") == "true"
+  new_is_jingle = (new.metadata["is_jingle"] ?? "false") == "true"
+
+  # Для джинглов — быстрый переход, без умничания
+  if old_is_jingle or new_is_jingle then
+    log("[CrossFade] Jingle detected → quick sequence")
+    sequence([fade.out(duration=0.5, old.source), fade.in(duration=0.3, new.source)])
+  else
+    # Определяем "энергетический класс" по liq_amplify:
+    #   amplify > 6 dB  → тихий трек (acoustic, ambient, ballad)
+    #   amplify < -2 dB → громкий трек (metal, EDM, punk)
+    #   между -2 и 6    → средний
+    old_energy = if old_amplify > 6.0 then "calm"
+                 elsif old_amplify < -2.0 then "hot"
+                 else "mid" end
+    new_energy = if new_amplify > 6.0 then "calm"
+                 elsif new_amplify < -2.0 then "hot"
+                 else "mid" end
+
+    log("[CrossFade] old=#{old_energy} (amplify=#{old_amplify} dB, RMS=#{old.db_level} dB) → new=#{new_energy} (amplify=#{new_amplify} dB, RMS=#{new.db_level} dB)")
+
+    if old_energy == "calm" and new_energy == "calm" then
+      # Два спокойных трека → длинный мягкий crossfade
+      log("[CrossFade] calm→calm: long smooth crossfade")
+      add(normalize=false, [
+        fade.out(type="sin", duration=5.0, old.source),
+        fade.in(type="sin", duration=4.0, new.source)
+      ])
+    elsif old_energy == "calm" and new_energy == "hot" then
+      # Тихий → Энергичный: быстро убираем старый, новый входит резко
+      log("[CrossFade] calm→hot: quick fade-out, hard in")
+      add(normalize=false, [
+        fade.out(type="exp", duration=1.5, old.source),
+        new.source
+      ])
+    elsif old_energy == "hot" and new_energy == "calm" then
+      # Энергичный → Тихий: даём старому отзвучать, новый мягко входит
+      log("[CrossFade] hot→calm: let old ring, gentle fade-in")
+      add(normalize=false, [
+        fade.out(type="sin", duration=2.5, old.source),
+        fade.in(type="sin", duration=3.5, new.source)
+      ])
+    elsif old_energy == "hot" and new_energy == "hot" then
+      # Два энергичных → короткий sharp crossfade, не замазываем
+      log("[CrossFade] hot→hot: short sharp crossfade")
+      add(normalize=false, [
+        fade.out(type="exp", duration=1.5, old.source),
+        fade.in(type="exp", duration=1.0, new.source)
+      ])
+    else
+      # mid→mid, mid→calm, mid→hot и т.д. → стандартный cross.smart
+      # Он сам разберётся по db_level
+      log("[CrossFade] mixed energy → delegating to cross.smart")
+      cross.smart(fade_in=2.5, fade_out=3.0, old, new)
+    end
+  end
 end
 
-autodj = smart_crossfade_logic(autodj)
+autodj = cross(
+  duration=5.0,    # Буфер: макс 5 секунд (должен покрывать самый длинный фейд)
+  minimum=0.0,     # Разрешаем crossfade даже для коротких остатков
+  energy_crossfade,
+  autodj
+)
 
 def transition_to_live(old, new) =
   add(normalize=false, [fade.initial(duration=1.0, new), fade.final(duration=3.0, old)])
