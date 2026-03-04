@@ -9,6 +9,7 @@ import { startNetworkLoops, fetchHistory, fetchNowPlaying, fetchServerMeta } fro
 import { initSearch } from './search.js';
 import { DEBUG } from './config.js';
 import { Visualizer } from './visualizer.js'; // ДОБАВЬ ЭТОТ ИМПОРТ
+import { initKeyboard } from './keyboard.js';
 
 console.log('🚀 Local Farts App init...');
 
@@ -34,6 +35,7 @@ Visualizer.resizeCanvas();
 
 initPlayerEvents();
 initSearch();
+initKeyboard(); // ИНИЦИАЛИЗИРУЕМ ГОРЯЧИЕ КЛАВИШИ
 initPlayer();
 
 fetchHistory();
