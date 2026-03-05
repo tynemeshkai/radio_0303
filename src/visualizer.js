@@ -3,7 +3,7 @@ import { isIOS, debugLine } from './utils.js';
 
 // ==============================================================================
 // VISUALIZER v2 — 3 режима: bars / waveform / mirror
-// Переключение по клику на канвас. Чёрный цвет. iOS = фейк-данные.
+// Переключение по клику на канвас. Чёрный цвет. Safari = фейк-данные.
 // ==============================================================================
 
 const MIN = 0.08;
@@ -28,8 +28,14 @@ let canvasH = 0;
 // Режим визуализации
 let currentMode = 0; // индекс в MODES
 
-// iOS = фейк
-const useFakeVisualizer = isIOS;
+// 🚀 РЕШЕНИЕ: Детектим ЛЮБОЙ Safari (iOS + macOS)
+// Регулярка проверяет наличие "safari", но исключает Chrome и Android (которые тоже пишут safari в UserAgent)
+const isSafariBrowser = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
+// Apple WebKit блокирует AnalyserNode для HLS-потоков (отдает нули). 
+// Поэтому для всех яблочных браузеров включаем генеративную анимацию.
+const useFakeVisualizer = isIOS || isSafariBrowser;
+
 const currentNoises = new Array(BARS_COUNT).fill(0);
 const targetNoises = new Array(BARS_COUNT).fill(0);
 
@@ -227,7 +233,7 @@ function drawWaveform(waveData) {
     ctx.clearRect(0, 0, canvasW, canvasH);
 
     ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 4;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.beginPath();
