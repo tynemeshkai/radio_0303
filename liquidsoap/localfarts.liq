@@ -40,6 +40,7 @@ icecast_pass = environment.get("ICECAST_SOURCE_PASS") ?? ""
 # --- DJ STATE ---
 current_dj_user = ref("")
 dj_kick_cancelled = ref(false)
+current_dj_name = ref("")
 
 def dj_auth_func(args) =
   user = args.user
@@ -81,6 +82,8 @@ def dj_on_connect(_headers) =
     "python3 -c \"import json; print(json.load(open('/tmp/dj_current_session.json')).get('name',''))\" 2>/dev/null || echo ''"
   ))
 
+  current_dj_name := dj_name
+
   print("[DJ] 🎧 #{dj_name} (#{dj_user}) connected, limit: #{max_minutes} min")
 
   if max_minutes > 0 then
@@ -111,6 +114,7 @@ def dj_on_disconnect() =
 
   dj_kick_cancelled := true
   current_dj_user := ""
+  current_dj_name := ""
 
   ignore(process.read(
     "/usr/local/bin/dj_session.py disconnect 2>/dev/null"
@@ -132,6 +136,32 @@ live = input.harbor(
   buffer=12.0,
   max=30.0
 )
+
+# --- ИНТЕРСЕПТОР МЕТАДАННЫХ ДЛЯ ПРЯМОГО ЭФИРА ---
+def override_live_meta(m) =
+  orig_artist = m["artist"] ?? ""
+  orig_title = m["title"] ?? ""
+  
+  # Склеиваем оригинального артиста и название трека в одну строку
+  new_title = if orig_artist != "" and orig_title != "" then
+    "#{orig_artist} - #{orig_title}"
+  elsif orig_title != "" then
+    orig_title
+  elsif orig_artist != "" then
+    orig_artist
+  else
+    "Live Session"
+  end
+
+  # Берем имя диджея, которое мы сохранили при логине
+  dj = current_dj_name()
+  new_artist = if dj != "" then "LIVE: #{dj}" else "LIVE: LOCAL FARTS" end
+
+  # Подменяем теги
+  [("artist", new_artist), ("title", new_title), ("source", "live")]
+end
+
+live = map_metadata(update=true, override_live_meta, live)
 
 # --- SMART TRACK PICKER ---
 def get_smart_track() =
@@ -186,6 +216,61 @@ radio_source = blank.skip(
 
 requests = request.queue()
 autodj = fallback(track_sensitive=true, [requests, radio_source])
+
+# ==============================================================================
+# 4.5 HISTORY LOGGING (до cross(), потому что cross() не пробрасывает on_track)
+# ==============================================================================
+def bash_quote(s) =
+  escaped = string.replace(pattern="'", fun (_) -> "'\\''", s)
+  "'#{escaped}'"
+end
+
+last_written_track = ref("")
+
+def get_track_name(m) =
+  artist = m["artist"] ?? ""
+  title = m["title"] ?? ""
+  song = m["song"] ?? ""
+  source_tag = m["source"] ?? ""
+
+  # УМНАЯ ЛОГИКА:
+  # Если это прямой эфир (source="live"), то в artist лежит имя диджея. 
+  # Нам оно в истории не нужно, берем только title (он уже склеен).
+  if source_tag == "live" then 
+    title
+  # Если это обычный AutoDJ, склеиваем Артиста и Название как обычно
+  elsif artist != "" and title != "" then 
+    "#{artist} - #{title}"
+  elsif title != "" then 
+    title
+  else 
+    song 
+  end
+end
+
+def update_history(m) =
+  is_jingle = m["is_jingle"] ?? "false"
+
+  if is_jingle == "true" then
+    print("MetaData: Jingle playing (History skipped)")
+  else
+    track_name = get_track_name(m)
+    current_last = last_written_track()
+    if track_name != "" and track_name != "Unknown Track" and track_name != current_last then
+      last_written_track := track_name
+
+      thread.run(fun () -> begin
+        safe_name = bash_quote(track_name)
+        cmd = "/usr/local/bin/write_history.sh #{safe_name}"
+        ignore(process.run(cmd))
+      end)
+    end
+  end
+end
+
+# Хук на autodj ДО cross() — ловим каждый новый трек
+autodj.on_track(synchronous=false, update_history)
+autodj.on_metadata(synchronous=false, update_history)
 
 # ==============================================================================
 # 5. ENERGY-BASED SMART CROSSFADE TEST
@@ -300,51 +385,17 @@ end
 radio = map_metadata(update=true, clean_metadata, radio)
 
 # ==============================================================================
-# 7. HISTORY LOGGING
+# 7. LIVE DJ METADATA FALLBACK
 # ==============================================================================
-def bash_quote(s) =
-  escaped = string.replace(pattern="'", fun (_) -> "'\\''", s)
-  "'#{escaped}'"
-end
-
-def run_history_cmd(cmd) =
-  ignore(process.test(cmd))
-end
-
-last_written_track = ref("")
-
-def get_track_name(m) =
-  artist = m["artist"] ?? ""
-  title = m["title"] ?? ""
-  song = m["song"] ?? ""
-
-  if artist != "" and title != "" then "#{artist} - #{title}"
-  elsif title != "" then title
-  else song end
-end
-
-def update_history(m) =
-  is_jingle = m["is_jingle"] ?? "false"
-
-  if is_jingle == "true" then
-    print("MetaData: Jingle playing (History skipped)")
-  else
-    track_name = get_track_name(m)
-    current_last = last_written_track()
-    if track_name != "" and track_name != "Unknown Track" and track_name != current_last then
-      last_written_track := track_name
-
-      thread.run(fun () -> begin
-        safe_name = bash_quote(track_name)
-        cmd = "/usr/local/bin/write_history.sh #{safe_name}"
-        ignore(process.run(cmd))
-      end)
-    end
+# autodj треки уже логируются в секции 4.5 (до cross).
+# Здесь ловим только метаданные от live DJ, которые приходят через fallback.
+radio.on_metadata(synchronous=false, fun (m) -> begin
+  # Проверяем что это не autodj-трек (уже записан), а live DJ
+  source_tag = m["source"] ?? ""
+  if source_tag == "live" or source_tag == "live_harbor" then
+    update_history(m)
   end
-end
-
-radio.on_track(synchronous=false, update_history)
-radio.on_metadata(synchronous=false, update_history)
+end)
 
 radio = mksafe(radio)
 
