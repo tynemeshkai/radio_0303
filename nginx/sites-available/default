@@ -1,309 +1,310 @@
-server {
-    listen 80;
-    listen [::]:80;
-    server_name localfarts.lol www.localfarts.lol;
-    # Принудительный редирект на HTTPS
-    return 301 https://$host$request_uri;
-}
+server { 
+    listen      80; 
+    listen      [::]:80; 
+    server_name localfarts.lol www.localfarts.lol; 
 
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name localfarts.lol www.localfarts.lol;
+    # Принудительный редирект на HTTPS 
+    return 301 https://$host$request_uri; 
+} 
 
-    root /var/www/html;
-    index index.html;
+server { 
+    listen      443 ssl http2; 
+    listen      [::]:443 ssl http2; 
+    server_name localfarts.lol www.localfarts.lol; 
 
-    # --- SSL Сертификаты ---
-    ssl_certificate /etc/letsencrypt/live/localfarts.lol/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/localfarts.lol/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    root        /var/www/html; 
+    index       index.html; 
 
-    # --- БЕЗОПАСНОСТЬ ---
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=()" always;
+    # --- SSL Сертификаты --- 
+    ssl_certificate         /etc/letsencrypt/live/localfarts.lol/fullchain.pem; 
+    ssl_certificate_key     /etc/letsencrypt/live/localfarts.lol/privkey.pem; 
+    include                 /etc/letsencrypt/options-ssl-nginx.conf; 
+    ssl_dhparam             /etc/letsencrypt/ssl-dhparams.pem; 
 
-    # --- ОПТИМИЗАЦИЯ ДЛЯ LIVE-СТРИМИНГА ---
-    keepalive_requests 1000;
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
+    # --- БЕЗОПАСНОСТЬ --- 
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains"        always; 
+    add_header X-Content-Type-Options    "nosniff"                                    always; 
+    add_header X-Frame-Options           "SAMEORIGIN"                                 always; 
+    add_header Referrer-Policy           "strict-origin-when-cross-origin"            always; 
+    add_header Permissions-Policy        "geolocation=(), microphone=(), camera=()"   always; 
 
-    # ==============================================================================
-    # 1. HLS СТРИМИНГ (ИЗ RAM-ДИСКА /dev/shm)
-    # ==============================================================================
-    location ^~ /hls/ {
-        auth_basic off;
-        alias /dev/shm/hls/;
+    # --- ОПТИМИЗАЦИЯ ДЛЯ LIVE-СТРИМИНГА --- 
+    keepalive_requests  1000; 
+    sendfile            on; 
+    tcp_nopush          on; 
+    tcp_nodelay         on; 
 
-        # Ведем отдельный лог HLS, чтобы не зашумлять общий access.log
-        access_log /var/log/nginx/hls_access.log;
-        log_not_found off;
+    # ============================================================================== 
+    # 1. HLS СТРИМИНГ (ИЗ RAM-ДИСКА /dev/shm) 
+    # ============================================================================== 
+    location ^~ /hls/ { 
+        auth_basic      off; 
+        root /dev/shm; 
+        
+        # Отдельный лог HLS, чтобы не зашумлять общий access.log 
+        access_log      /var/log/nginx/hls_access.log; 
+        log_not_found   off; 
 
-        types {
-            application/vnd.apple.mpegurl m3u8;
-            video/mp2t ts;
-            audio/aac aac;
-            video/mp4 mp4;
-            video/mp4 m4s;
+        types { 
+            application/vnd.apple.mpegurl  m3u8; 
+            video/mp2t                     ts; 
+            audio/aac                      aac; 
+            video/mp4                      mp4; 
+            video/iso.segment              m4s;  # <--- ВОТ ЗДЕСЬ ИСПРАВЛЕНО
         }
-        default_type application/octet-stream;
+        default_type application/octet-stream; 
 
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
-        add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always;
-        add_header Accept-Ranges "bytes" always;
+        add_header Access-Control-Allow-Origin   "*"                               always; 
+        add_header Access-Control-Allow-Methods  "GET, HEAD, OPTIONS"              always; 
+        add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always; 
+        add_header Accept-Ranges                 "bytes"                           always; 
 
-        # CORS preflight
-        if ($request_method = OPTIONS) {
-            add_header Access-Control-Allow-Origin "*" always;
-            add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
-            add_header Access-Control-Allow-Headers "Origin,Range,Accept,Content-Type,Authorization" always;
-            add_header Content-Length 0;
-            add_header Content-Type text/plain;
-            return 204;
-        }
+        # CORS preflight 
+        if ($request_method = OPTIONS) { 
+            add_header Access-Control-Allow-Origin   "*"                           always; 
+            add_header Access-Control-Allow-Methods  "GET, HEAD, OPTIONS"          always; 
+            add_header Access-Control-Allow-Headers  "Origin,Range,Accept,Content-Type,Authorization" always; 
+            add_header Content-Length                0; 
+            add_header Content-Type                  text/plain; 
+            return 204; 
+        } 
 
-        # Плейлисты должны быть всегда свежими
-        # ВАЖНО: дублируем CORS-заголовки внутри if, т.к. nginx перезаписывает
-        # add_header родительского контекста при наличии add_header в if-блоке
-        if ($request_filename ~* \.m3u8$) {
-            add_header Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always;
-            add_header Pragma "no-cache" always;
-            add_header Expires "0" always;
-            add_header Access-Control-Allow-Origin "*" always;
-            add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
-            add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always;
-        }
+        # Плейлисты должны быть всегда свежими (дублируем CORS заголовки)
+        if ($request_filename ~* \.m3u8$) { 
+            add_header Cache-Control                 "no-cache, no-store, must-revalidate, max-age=0" always; 
+            add_header Pragma                        "no-cache"                    always; 
+            add_header Expires                       "0"                           always; 
+            add_header Access-Control-Allow-Origin   "*"                           always; 
+            add_header Access-Control-Allow-Methods  "GET, HEAD, OPTIONS"          always; 
+            add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always; 
+        } 
 
-        # fMP4 сегменты (.m4s) и init-сегменты (.mp4) неизменны — кэшируем
-        # Дублируем CORS-заголовки по той же причине
-        if ($request_filename ~* \.(ts|m4s|aac|mp4)$) {
-            add_header Cache-Control "public, max-age=3600, immutable" always;
-            add_header Access-Control-Allow-Origin "*" always;
-            add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
-            add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always;
-        }
-    }
+        # fMP4 сегменты (.m4s) и init-сегменты (.mp4) неизменны — кэшируем 
+        if ($request_filename ~* \.(ts|m4s|aac|mp4)$) { 
+            add_header Cache-Control                 "public, max-age=3600, immutable" always; 
+            add_header Access-Control-Allow-Origin   "*"                           always; 
+            add_header Access-Control-Allow-Methods  "GET, HEAD, OPTIONS"          always; 
+            add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always; 
+        } 
+    } 
 
-    # ==============================================================================
-    # 2. NOW PLAYING + HISTORY (МЕТАДАННЫЕ)
-    # ==============================================================================
-    location = /nowplaying.json {
-        auth_basic off;
-        root /srv/radio/radio_data;
-        default_type application/json;
-        try_files $uri =404;
-
-        expires -1;
-        add_header Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always;
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Expose-Headers "Date" always;
-    }
-
-    # Fallback direct audio stream (для браузеров/устройств, где HLS работает нестабильно)
-    location = /stream {
-        return 302 /stream_lossless.ogg;
-    }
-
-    location = /stream_lossless.ogg {
-        auth_basic off;
-        proxy_pass http://127.0.0.1:8000/stream_lossless.ogg;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_read_timeout 3600s;
-        send_timeout 3600s;
-
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always;
-    }
-
-# Редирект /panel → /panel/
-    location = /panel {
-        return 301 /panel/;
-    }
-
-    # Radio Admin панель
-    location /panel/ {
-        auth_basic off;
-        alias /srv/radio/admin/;
-        index index.html;
-        try_files $uri $uri/ /panel/index.html;
-    }
+    # ============================================================================== 
+    # 2. МЕТАДАННЫЕ И РАДИО-ПАНЕЛЬ
+    # ============================================================================== 
     
-    location /api/ {
-        auth_basic off;          # ← отключаем nginx auth для API
-     proxy_pass http://127.0.0.1:8888;
-     proxy_set_header Host $host;
-     proxy_set_header X-Real-IP $remote_addr;
-     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-     proxy_set_header X-Forwarded-Proto $scheme;
-     proxy_read_timeout 30s;
-}
+    # --- JSON Данные ---
+    location = /nowplaying.json { 
+        auth_basic      off; 
+        root            /srv/radio/radio_data; 
+        default_type    application/json; 
+        try_files       $uri =404; 
 
-    location = /history.json {
-        auth_basic off;
-        root /srv/radio/radio_data;
-        default_type application/json;
-        try_files $uri =404;
+        expires         -1; 
+        add_header      Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always; 
+        add_header      Access-Control-Allow-Origin "*" always; 
+        add_header      Access-Control-Expose-Headers "Date" always; 
+    } 
 
-        expires -1;
-        add_header Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always;
-        add_header Access-Control-Allow-Origin "*" always;
-    }
+    location = /history.json { 
+        auth_basic      off; 
+        root            /srv/radio/radio_data; 
+        default_type    application/json; 
+        try_files       $uri =404; 
 
-    location = /history.txt {
-        auth_basic off;
-        root /srv/radio/radio_data;
-        default_type text/plain;
-        try_files $uri =404;
+        expires         -1; 
+        add_header      Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always; 
+        add_header      Access-Control-Allow-Origin "*" always; 
+    } 
 
-        expires -1;
-        add_header Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always;
-        add_header Access-Control-Allow-Origin "*" always;
-    }
+    location = /history.txt { 
+        auth_basic      off; 
+        root            /srv/radio/radio_data; 
+        default_type    text/plain; 
+        try_files       $uri =404; 
 
-    # Live listeners snapshot из RAM-диска
-    location = /live-stats.json {
-        auth_basic off;
-        default_type application/json;
-        alias /dev/shm/live-stats.json;
+        expires         -1; 
+        add_header      Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always; 
+        add_header      Access-Control-Allow-Origin "*" always; 
+    } 
 
-        expires -1;
-        add_header Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always;
-        add_header Access-Control-Allow-Origin "*" always;
-    }
+    location = /live-stats.json { 
+        auth_basic      off; 
+        default_type    application/json; 
+        alias           /dev/shm/live-stats.json; 
 
-    # ==============================================================================
-    # 3. SSE
-    # ==============================================================================
-    location /events {
-        proxy_pass http://127.0.0.1:7890/events;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        expires         -1; 
+        add_header      Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always; 
+        add_header      Access-Control-Allow-Origin "*" always; 
+    } 
 
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_request_buffering off;
+    # --- Прямые Аудиопотоки ---
+    location = /stream { 
+        return 302 /stream_lossless.ogg; 
+    } 
 
-        proxy_read_timeout 86400s;
-        send_timeout 86400s;
+    location = /stream_lossless.ogg { 
+        auth_basic                  off; 
+        proxy_pass                  http://127.0.0.1:8000/stream_lossless.ogg; 
+        proxy_http_version          1.1; 
+        
+        proxy_set_header Host       $host; 
+        proxy_set_header X-Real-IP  $remote_addr; 
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto $scheme; 
 
-        add_header Cache-Control "no-cache" always;
-        add_header X-Accel-Buffering "no" always;
-    }
+        proxy_buffering             off; 
+        proxy_request_buffering     off; 
+        proxy_read_timeout          3600s; 
+        send_timeout                3600s; 
 
-    # WebSocket endpoint для GoAccess real-time.
-    # ВАЖНО: GoAccess должен слушать 127.0.0.1:7891, чтобы не конфликтовать с SSE (7890).
-    location /ws-stats {
-        proxy_pass http://127.0.0.1:7891/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        add_header Access-Control-Allow-Origin "*" always; 
+        add_header Cache-Control    "no-cache, no-store, must-revalidate, max-age=0" always; 
+    } 
 
-        proxy_read_timeout 86400s;
-        proxy_send_timeout 86400s;
-    }
+    # --- Админ-панель и API ---
+    location = /panel { 
+        return 301 /panel/; 
+    } 
 
-    # ==============================================================================
-    # GRAFANA MONITORING
-    # ==============================================================================
-    location /monitoring/ {
-        auth_basic "Monitoring";
-        auth_basic_user_file /etc/nginx/.grafana_htpasswd;
+    location /panel/ { 
+        auth_basic      off; 
+        alias           /srv/radio/admin/; 
+        index           index.html; 
+        try_files       $uri $uri/ /panel/index.html; 
+    } 
+     
+    location /api/ { 
+        auth_basic                  off; 
+        proxy_pass                  http://127.0.0.1:8888; 
+        
+        proxy_set_header Host       $host; 
+        proxy_set_header X-Real-IP  $remote_addr; 
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto $scheme; 
+        
+        proxy_read_timeout          30s; 
+    } 
 
-        proxy_pass http://127.0.0.1:3000/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    # ============================================================================== 
+    # 3. SSE И WEBSOCKETS (REAL-TIME)
+    # ============================================================================== 
+    location /events { 
+        proxy_pass                  http://127.0.0.1:7890/events; 
+        proxy_http_version          1.1; 
+        
+        proxy_set_header Connection ""; 
+        proxy_set_header Host       $host; 
+        proxy_set_header X-Real-IP  $remote_addr; 
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto $scheme; 
 
-        # WebSocket
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_buffering             off; 
+        proxy_cache                 off; 
+        proxy_request_buffering     off; 
 
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-    }
+        proxy_read_timeout          86400s; 
+        send_timeout                86400s; 
 
-    # ==============================================================================
-    # 4. ПРОКСИРОВАНИЕ ICECAST (АДМИНКА И STATUS-JSON)
-    # ==============================================================================
-    location /admin/ {
-        proxy_pass http://127.0.0.1:8000/admin/;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_pass_header Authorization;
-    }
+        add_header Cache-Control    "no-cache" always; 
+        add_header X-Accel-Buffering "no"      always; 
+    } 
 
-    location = /status-json.xsl {
-        proxy_pass http://127.0.0.1:8000/status-json.xsl;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+    # GoAccess real-time (127.0.0.1:7891)
+    location /ws-stats { 
+        proxy_pass                  http://127.0.0.1:7891/; 
+        proxy_http_version          1.1; 
+        
+        proxy_set_header Upgrade    $http_upgrade; 
+        proxy_set_header Connection "upgrade"; 
+        proxy_set_header Host       $host; 
+        proxy_set_header X-Real-IP  $remote_addr; 
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto $scheme; 
 
-        proxy_connect_timeout 2s;
-        proxy_read_timeout 5s;
+        proxy_read_timeout          86400s; 
+        proxy_send_timeout          86400s; 
+    } 
 
-        add_header Cache-Control "no-cache" always;
-        add_header Access-Control-Allow-Origin "*" always;
-    }
+    # ============================================================================== 
+    # 4. GRAFANA И ICECAST (ПРОКСИРОВАНИЕ)
+    # ============================================================================== 
+    location /monitoring/ { 
+        auth_basic                  "Monitoring"; 
+        auth_basic_user_file        /etc/nginx/.grafana_htpasswd; 
 
-    # Не отдаем скрытые файлы (.env, .git и т.д.)
-    location ~ /\.(?!well-known).* {
-        deny all;
-    }
+        proxy_pass                  http://127.0.0.1:3000/; 
+        proxy_http_version          1.1; 
+        
+        proxy_set_header Host       $host; 
+        proxy_set_header X-Real-IP  $remote_addr; 
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto $scheme; 
+        proxy_set_header Upgrade    $http_upgrade; 
+        proxy_set_header Connection "upgrade"; 
 
-    # ==============================================================================
-    # 5. СТАТИКА САЙТА
-    # ==============================================================================
-    location / {
-        limit_req zone=one burst=30 nodelay;
-        try_files $uri $uri/ =404;
-    }
+        proxy_read_timeout          300s; 
+        proxy_send_timeout          300s; 
+    } 
 
-    # JS/CSS не кэшируем агрессивно, чтобы пользователи быстро получали новые версии
-    location ~* \.(css|js)$ {
-        expires -1;
-        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
-        try_files $uri =404;
-    }
+    location /admin/ { 
+        proxy_pass                  http://127.0.0.1:8000/admin/; 
+        proxy_http_version          1.1; 
+        
+        proxy_set_header Host       $host; 
+        proxy_set_header X-Real-IP  $remote_addr; 
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto $scheme; 
+        proxy_pass_header           Authorization; 
+    } 
 
-    # Картинки и шрифты можно кэшировать долго
-    location ~* \.(jpg|jpeg|png|gif|ico|webp|svg|woff|woff2|ttf)$ {
-        expires 30d;
-        add_header Cache-Control "public, max-age=2592000, immutable" always;
-        access_log off;
-        try_files $uri =404;
-    }
+    location = /status-json.xsl { 
+        proxy_pass                  http://127.0.0.1:8000/status-json.xsl; 
+        
+        proxy_set_header Host       $host; 
+        proxy_set_header X-Real-IP  $remote_addr; 
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto $scheme; 
 
-    location = /manifest.json {
-        default_type application/manifest+json;
-        expires 1h;
-        add_header Cache-Control "public, max-age=3600" always;
-        try_files $uri =404;
-    }
+        proxy_connect_timeout       2s; 
+        proxy_read_timeout          5s; 
+
+        add_header Cache-Control    "no-cache" always; 
+        add_header Access-Control-Allow-Origin "*" always; 
+    } 
+
+    # ============================================================================== 
+    # 5. СТАТИКА САЙТА И БЕЗОПАСНОСТЬ
+    # ============================================================================== 
+    
+    # Не отдаем скрытые файлы (.env, .git и т.д.) 
+    location ~ /\.(?!well-known).* { 
+        deny all; 
+    } 
+
+    location / { 
+        limit_req zone=one burst=30 nodelay; 
+        try_files $uri $uri/ =404; 
+    } 
+
+    # JS/CSS (отключаем кэш для быстрой доставки обновлений)
+    location ~* \.(css|js)$ { 
+        expires     -1; 
+        add_header  Cache-Control "no-cache, no-store, must-revalidate" always; 
+        try_files   $uri =404; 
+    } 
+
+    # Картинки и шрифты (агрессивное кэширование)
+    location ~* \.(jpg|jpeg|png|gif|ico|webp|svg|woff|woff2|ttf)$ { 
+        expires     30d; 
+        add_header  Cache-Control "public, max-age=2592000, immutable" always; 
+        access_log  off; 
+        try_files   $uri =404; 
+    } 
+
+    location = /manifest.json { 
+        default_type application/manifest+json; 
+        expires      1h; 
+        add_header   Cache-Control "public, max-age=3600" always; 
+        try_files    $uri =404; 
+    } 
 }
