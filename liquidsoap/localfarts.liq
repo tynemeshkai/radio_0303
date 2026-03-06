@@ -3,6 +3,7 @@
 # ==============================================================================
 # 1. SYSTEM & SETTINGS (Liquidsoap 2.4.2 Production)
 # ==============================================================================
+
 settings.init.allow_root.set(true)
 settings.server.telnet.set(true)
 settings.server.telnet.port.set(1234)
@@ -13,34 +14,28 @@ settings.request.prefetch.set(4)
 settings.charset.max_string_length.set(8192)
 
 # ==============================================================================
-# НОРМАЛИЗАЦИЯ ГРОМКОСТИ: Autocue (единственная система)
+# НОРМАЛИЗАЦИЯ ГРОМКОСТИ: Autocue
 # ==============================================================================
 # Autocue анализирует каждый трек по EBU R128 и ставит liq_amplify.
-# Liquidsoap автоматически применяет liq_amplify при воспроизведении.
 # Целевая громкость: -16 LUFS (стандарт интернет-радио).
-#
-# УБРАНО: ReplayGain amplify() — вызывал ДВОЙНУЮ нормализацию:
-#   Autocue (liq_amplify) + ReplayGain (replay_gain) = электроника задушена на -22 dB,
-#   а рок только на -6 dB. Разница 16 dB вместо 0.
-#
-# ReplayGain теги в файлах сохранены (для совместимости с другими плеерами),
-# но Liquidsoap их больше НЕ применяет.
+# ReplayGain теги сохранены для совместимости, но не применяются во избежание 
+# двойной нормализации.
 
 enable_autocue_metadata()
 
 # ==============================================================================
 # 2. SECRETS
 # ==============================================================================
+
 icecast_pass = environment.get("ICECAST_SOURCE_PASS") ?? ""
 
 # ==============================================================================
 # 3. DJ AUTH SYSTEM
 # ==============================================================================
 
-# --- DJ STATE ---
-current_dj_user = ref("")
+current_dj_user   = ref("")
 dj_kick_cancelled = ref(false)
-current_dj_name = ref("")
+current_dj_name   = ref("")
 
 def dj_auth_func(args) =
   user = args.user
@@ -53,10 +48,9 @@ def dj_auth_func(args) =
   auth_data = "#{user}\n#{pass}\n#{addr}"
   file.write(data=auth_data, "/tmp/dj_auth_input.tmp")
 
-  result = string.trim(process.read(
-    "/usr/local/bin/dj_auth.py < /tmp/dj_auth_input.tmp 2>/dev/null"
-  ))
-
+  cmd_auth = "/usr/local/bin/dj_auth.py < /tmp/dj_auth_input.tmp 2>/dev/null"
+  result   = string.trim(process.read(cmd_auth))
+  
   ignore(process.read("rm -f /tmp/dj_auth_input.tmp"))
 
   if result == "true" then
@@ -73,17 +67,14 @@ def dj_on_connect(_headers) =
   dj_user = current_dj_user()
   dj_kick_cancelled := false
 
-  max_str = string.trim(process.read(
-    "python3 -c \"import json; print(json.load(open('/tmp/dj_current_session.json')).get('max_minutes',0))\" 2>/dev/null || echo '0'"
-  ))
-  max_minutes = int_of_string(default=0, max_str)
+  cmd_max_mins = "python3 -c \"import json; print(json.load(open('/tmp/dj_current_session.json')).get('max_minutes',0))\" 2>/dev/null || echo '0'"
+  max_str      = string.trim(process.read(cmd_max_mins))
+  max_minutes  = int_of_string(default=0, max_str)
 
-  dj_name = string.trim(process.read(
-    "python3 -c \"import json; print(json.load(open('/tmp/dj_current_session.json')).get('name',''))\" 2>/dev/null || echo ''"
-  ))
+  cmd_dj_name  = "python3 -c \"import json; print(json.load(open('/tmp/dj_current_session.json')).get('name',''))\" 2>/dev/null || echo ''"
+  dj_name      = string.trim(process.read(cmd_dj_name))
 
   current_dj_name := dj_name
-
   print("[DJ] 🎧 #{dj_name} (#{dj_user}) connected, limit: #{max_minutes} min")
 
   if max_minutes > 0 then
@@ -93,16 +84,12 @@ def dj_on_connect(_headers) =
       if not dj_kick_cancelled() then
         print("[DJ] ⏰ Auto-kick #{dj_user} after #{max_minutes} min")
 
-        ignore(process.read(
-          "/usr/local/bin/dj_session.py disconnect 2>/dev/null"
-        ))
-        ignore(process.read(
-          "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] AUTO-KICK #{dj_user} (exceeded #{max_minutes} min)\" >> /var/log/localfarts/dj.log"
-        ))
+        ignore(process.read("/usr/local/bin/dj_session.py disconnect 2>/dev/null"))
+        
+        log_cmd = "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] AUTO-KICK #{dj_user} (exceeded #{max_minutes} min)\" >> /var/log/localfarts/dj.log"
+        ignore(process.read(log_cmd))
 
-        ignore(process.read(
-          "echo 'live_harbor.stop' | nc -w 2 127.0.0.1 1234 2>/dev/null"
-        ))
+        ignore(process.read("echo 'live_harbor.stop' | nc -w 2 127.0.0.1 1234 2>/dev/null"))
       end
     end)
   end
@@ -113,19 +100,17 @@ def dj_on_disconnect() =
   print("[DJ] 👋 #{dj_user} disconnected")
 
   dj_kick_cancelled := true
-  current_dj_user := ""
-  current_dj_name := ""
+  current_dj_user   := ""
+  current_dj_name   := ""
 
-  ignore(process.read(
-    "/usr/local/bin/dj_session.py disconnect 2>/dev/null"
-  ))
+  ignore(process.read("/usr/local/bin/dj_session.py disconnect 2>/dev/null"))
 end
 
 # ==============================================================================
 # 4. SOURCES
 # ==============================================================================
 
-# --- LIVE DJ (с авторизацией per-DJ) ---
+# --- LIVE DJ ---
 live = input.harbor(
   "live",
   id="live_harbor",
@@ -140,24 +125,22 @@ live = input.harbor(
 # --- ИНТЕРСЕПТОР МЕТАДАННЫХ ДЛЯ ПРЯМОГО ЭФИРА ---
 def override_live_meta(m) =
   orig_artist = m["artist"] ?? ""
-  orig_title = m["title"] ?? ""
+  orig_title  = m["title"] ?? ""
   
-  # Склеиваем оригинального артиста и название трека в одну строку
-  new_title = if orig_artist != "" and orig_title != "" then
-    "#{orig_artist} - #{orig_title}"
-  elsif orig_title != "" then
-    orig_title
-  elsif orig_artist != "" then
-    orig_artist
-  else
-    "Live Session"
-  end
+  new_title = 
+    if orig_artist != "" and orig_title != "" then
+      "#{orig_artist} - #{orig_title}"
+    elsif orig_title != "" then
+      orig_title
+    elsif orig_artist != "" then
+      orig_artist
+    else
+      "Live Session"
+    end
 
-  # Берем имя диджея, которое мы сохранили при логине
   dj = current_dj_name()
   new_artist = if dj != "" then "LIVE: #{dj}" else "LIVE: LOCAL FARTS" end
 
-  # Подменяем теги
   [("artist", new_artist), ("title", new_title), ("source", "live")]
 end
 
@@ -165,14 +148,14 @@ live = map_metadata(update=true, override_live_meta, live)
 
 # --- SMART TRACK PICKER ---
 def get_smart_track() =
-  # smart-picker обязан вернуть путь к аудиофайлу в stdout.
-  # Если он не ответил, fallback берёт случайную строку из music.m3u
-  # (а не сам файл плейлиста, который декодировать нельзя).
-  result = string.trim(process.read("/bin/bash -lc '/usr/local/bin/smart-picker.py 2>/dev/null || /usr/bin/shuf -n1 /srv/radio/music.m3u'"))
+  cmd_picker = "/bin/bash -lc '/usr/local/bin/smart-picker.py 2>/dev/null || /usr/bin/shuf -n1 /srv/radio/music.m3u'"
+  result     = string.trim(process.read(cmd_picker))
+  
   if result != "" then
     request.create(result)
   else
-    request.create(string.trim(process.read("/usr/bin/shuf -n1 /srv/radio/music.m3u")))
+    fallback_cmd = "/usr/bin/shuf -n1 /srv/radio/music.m3u"
+    request.create(string.trim(process.read(fallback_cmd)))
   end
 end
 
@@ -183,19 +166,15 @@ background_music_smart = request.dynamic(
   get_smart_track
 )
 
-# --- FALLBACKS ---
+# --- FALLBACKS & JINGLES ---
 background_music_fallback = playlist(
-  id="music_fallback",
-  mode="randomize",
-  reload_mode="watch",
-  "/srv/radio/music.m3u"
+  id="music_fallback", mode="randomize", reload_mode="watch", "/srv/radio/music.m3u"
 )
 
-# --- JINGLES ---
 jingles = playlist(
-  id="jingles_playlist",
-  mode="randomize",
-  reload_mode="watch",
+  id="jingles_playlist", 
+  mode="randomize", 
+  reload_mode="watch", 
   prefix="annotate:is_jingle=\"true\",liq_cross_duration=\"0.1\":",
   "/srv/radio/jingles.m3u"
 )
@@ -208,18 +187,16 @@ radio_source = random(weights=[6, 1], [music_source, jingles])
 
 # Защита от тишины
 radio_source = blank.skip(
-  max_blank=5.0,
-  threshold=-50.0,
-  track_sensitive=true,
-  radio_source
+  max_blank=3.0, threshold=-60.0, track_sensitive=false, radio_source
 )
 
-requests = request.queue()
-autodj = fallback(track_sensitive=true, [requests, radio_source])
+requests = request.queue(id="requests")
+autodj   = fallback(id="autodj", track_sensitive=true, [requests, radio_source])
 
 # ==============================================================================
-# 4.5 HISTORY LOGGING (до cross(), потому что cross() не пробрасывает on_track)
+# 4.5 HISTORY LOGGING
 # ==============================================================================
+
 def bash_quote(s) =
   escaped = string.replace(pattern="'", fun (_) -> "'\\''", s)
   "'#{escaped}'"
@@ -228,23 +205,19 @@ end
 last_written_track = ref("")
 
 def get_track_name(m) =
-  artist = m["artist"] ?? ""
-  title = m["title"] ?? ""
-  song = m["song"] ?? ""
+  artist     = m["artist"] ?? ""
+  title      = m["title"] ?? ""
+  song       = m["song"] ?? ""
   source_tag = m["source"] ?? ""
 
-  # УМНАЯ ЛОГИКА:
-  # Если это прямой эфир (source="live"), то в artist лежит имя диджея. 
-  # Нам оно в истории не нужно, берем только title (он уже склеен).
-  if source_tag == "live" then 
+  if source_tag == "live" then
     title
-  # Если это обычный AutoDJ, склеиваем Артиста и Название как обычно
-  elsif artist != "" and title != "" then 
+  elsif artist != "" and title != "" then
     "#{artist} - #{title}"
-  elsif title != "" then 
+  elsif title != "" then
     title
-  else 
-    song 
+  else
+    song
   end
 end
 
@@ -254,100 +227,86 @@ def update_history(m) =
   if is_jingle == "true" then
     print("MetaData: Jingle playing (History skipped)")
   else
-    track_name = get_track_name(m)
+    track_name   = get_track_name(m)
     current_last = last_written_track()
+    
     if track_name != "" and track_name != "Unknown Track" and track_name != current_last then
       last_written_track := track_name
 
       thread.run(fun () -> begin
         safe_name = bash_quote(track_name)
-        cmd = "/usr/local/bin/write_history.sh #{safe_name}"
+        cmd       = "/usr/local/bin/write_history.sh #{safe_name}"
         ignore(process.run(cmd))
       end)
     end
   end
 end
 
-# Хук на autodj ДО cross() — ловим каждый новый трек
 autodj.on_track(synchronous=false, update_history)
 autodj.on_metadata(synchronous=false, update_history)
 
 # ==============================================================================
-# 5. ENERGY-BASED SMART CROSSFADE TEST
+# 5. ENERGY-BASED SMART CROSSFADE
 # ==============================================================================
 
 def energy_crossfade(old, new) =
-  # Читаем liq_amplify из autocue — это "сколько dB добавить чтобы дотянуть до -16 LUFS"
-  # Чем БОЛЬШЕ liq_amplify, тем ТИШЕ оригинал → спокойный трек
-  # Чем МЕНЬШЕ (или отрицательное), тем ГРОМЧЕ оригинал → энергичный трек
   old_amplify = float_of_string(default=0.0, old.metadata["liq_amplify"] ?? "0")
   new_amplify = float_of_string(default=0.0, new.metadata["liq_amplify"] ?? "0")
 
   old_is_jingle = (old.metadata["is_jingle"] ?? "false") == "true"
   new_is_jingle = (new.metadata["is_jingle"] ?? "false") == "true"
 
-  # Для джинглов — быстрый переход, без умничания
   if old_is_jingle or new_is_jingle then
     log("[CrossFade] Jingle detected → quick sequence")
     sequence([fade.out(duration=0.5, old.source), fade.in(duration=0.3, new.source)])
   else
-    # Определяем "энергетический класс" по liq_amplify:
-    #   amplify > 6 dB  → тихий трек (acoustic, ambient, ballad)
-    #   amplify < -2 dB → громкий трек (metal, EDM, punk)
-    #   между -2 и 6    → средний
-    old_energy = if old_amplify > 6.0 then "calm"
-                 elsif old_amplify < -2.0 then "hot"
-                 else "mid" end
-    new_energy = if new_amplify > 6.0 then "calm"
-                 elsif new_amplify < -2.0 then "hot"
-                 else "mid" end
+    old_energy = 
+      if old_amplify > 6.0 then "calm"
+      elsif old_amplify < -2.0 then "hot"
+      else "mid" end
+      
+    new_energy = 
+      if new_amplify > 6.0 then "calm"
+      elsif new_amplify < -2.0 then "hot"
+      else "mid" end
 
-    log("[CrossFade] old=#{old_energy} (amplify=#{old_amplify} dB, RMS=#{old.db_level} dB) → new=#{new_energy} (amplify=#{new_amplify} dB, RMS=#{new.db_level} dB)")
+    log("[CrossFade] old=#{old_energy} (amplify=#{old_amplify} dB) → new=#{new_energy} (amplify=#{new_amplify} dB)")
 
     if old_energy == "calm" and new_energy == "calm" then
-      # Два спокойных трека → длинный мягкий crossfade
       log("[CrossFade] calm→calm: long smooth crossfade")
       add(normalize=false, [
         fade.out(type="sin", duration=5.0, old.source),
         fade.in(type="sin", duration=4.0, new.source)
       ])
     elsif old_energy == "calm" and new_energy == "hot" then
-      # Тихий → Энергичный: быстро убираем старый, новый входит резко
       log("[CrossFade] calm→hot: quick fade-out, hard in")
       add(normalize=false, [
         fade.out(type="exp", duration=1.5, old.source),
         new.source
       ])
     elsif old_energy == "hot" and new_energy == "calm" then
-      # Энергичный → Тихий: даём старому отзвучать, новый мягко входит
       log("[CrossFade] hot→calm: let old ring, gentle fade-in")
       add(normalize=false, [
         fade.out(type="sin", duration=2.5, old.source),
         fade.in(type="sin", duration=3.5, new.source)
       ])
     elsif old_energy == "hot" and new_energy == "hot" then
-      # Два энергичных → короткий sharp crossfade, не замазываем
       log("[CrossFade] hot→hot: short sharp crossfade")
       add(normalize=false, [
         fade.out(type="exp", duration=1.5, old.source),
         fade.in(type="exp", duration=1.0, new.source)
       ])
     else
-      # mid→mid, mid→calm, mid→hot — стандартный crossfade
-      log("[CrossFade] mixed energy → standard crossfade (fade_in=2.5, fade_out=3.0)")
+      log("[CrossFade] mixed energy → standard crossfade")
       add(normalize=false, [
         fade.out(type="sin", duration=3.0, old.source),
         fade.in(type="sin", duration=2.5, new.source)
       ])
-    end  
+    end
   end
 end
 
-autodj = cross(
-  duration=5.0,
-  energy_crossfade,
-  autodj
-)
+autodj = cross(duration=5.0, energy_crossfade, autodj)
 
 def transition_to_live(old, new) =
   add(normalize=false, [fade.initial(duration=1.0, new), fade.final(duration=3.0, old)])
@@ -366,18 +325,28 @@ radio = fallback(
 # ==============================================================================
 # 6. METADATA NORMALIZATION (ОЧИСТКА МУСОРА)
 # ==============================================================================
+
 def clean_metadata(m) =
   def clean_str(s) =
-    s1 = string.replace(pattern="\\.\\(mp3\\|flac\\|wav\\|ogg\\|m4a\\|MP3\\|FLAC\\|WAV\\|OGG\\|M4A\\)$", fun (_) -> "", s)
-    s2 = string.replace(pattern=" *([^)]*\\(Remaster\\|remaster\\|REMASTER\\|Original Mix\\|original mix\\|ORIGINAL MIX\\|Radio Edit\\|radio edit\\|RADIO EDIT\\|Official\\|official\\|OFFICIAL\\|Lyric\\|lyric\\|LYRIC\\|Video\\|video\\|VIDEO\\|Audio\\|audio\\|AUDIO\\)[^)]*)", fun (_) -> "", s1)
-    s3 = string.replace(pattern=" *\\[[^]]*\\(Remaster\\|remaster\\|REMASTER\\|Original Mix\\|original mix\\|ORIGINAL MIX\\|Radio Edit\\|radio edit\\|RADIO EDIT\\|Official\\|official\\|OFFICIAL\\|Lyric\\|lyric\\|LYRIC\\|Video\\|video\\|VIDEO\\|Audio\\|audio\\|AUDIO\\)[^]]*\\]", fun (_) -> "", s2)
-    s4 = string.replace(pattern=" *- \\(Remaster\\|remaster\\|REMASTER\\|Radio Edit\\|radio edit\\|RADIO EDIT\\|Official Video\\|official video\\|OFFICIAL VIDEO\\).*$", fun (_) -> "", s3)
+    # Разбили адский regex на переменные для читаемости
+    ext_regex   = "\\.\\(mp3\\|flac\\|wav\\|ogg\\|m4a\\|MP3\\|FLAC\\|WAV\\|OGG\\|M4A\\)$"
+    tags_regex  = "\\(Remaster\\|remaster\\|REMASTER\\|Original Mix\\|original mix\\|ORIGINAL MIX\\|Radio Edit\\|radio edit\\|RADIO EDIT\\|Official\\|official\\|OFFICIAL\\|Lyric\\|lyric\\|LYRIC\\|Video\\|video\\|VIDEO\\|Audio\\|audio\\|AUDIO\\)"
+    
+    paren_regex = " *([^)]*#{tags_regex}[^)]*)"
+    brack_regex = " *\\[[^]]*#{tags_regex}[^]]*\\]"
+    dash_regex  = " *- \\(Remaster\\|remaster\\|REMASTER\\|Radio Edit\\|radio edit\\|RADIO EDIT\\|Official Video\\|official video\\|OFFICIAL VIDEO\\).*$"
+
+    s1 = string.replace(pattern=ext_regex, fun (_) -> "", s)
+    s2 = string.replace(pattern=paren_regex, fun (_) -> "", s1)
+    s3 = string.replace(pattern=brack_regex, fun (_) -> "", s2)
+    s4 = string.replace(pattern=dash_regex, fun (_) -> "", s3)
+    
     string.trim(s4)
   end
 
-  title = m["title"] ?? ""
+  title  = m["title"] ?? ""
   artist = m["artist"] ?? ""
-  song = m["song"] ?? ""
+  song   = m["song"] ?? ""
 
   [("title", clean_str(title)), ("artist", clean_str(artist)), ("song", clean_str(song))]
 end
@@ -385,12 +354,10 @@ end
 radio = map_metadata(update=true, clean_metadata, radio)
 
 # ==============================================================================
-# 7. LIVE DJ METADATA FALLBACK
+# 7. LIVE DJ METADATA FALLBACK & LIMITER
 # ==============================================================================
-# autodj треки уже логируются в секции 4.5 (до cross).
-# Здесь ловим только метаданные от live DJ, которые приходят через fallback.
+
 radio.on_metadata(synchronous=false, fun (m) -> begin
-  # Проверяем что это не autodj-трек (уже записан), а live DJ
   source_tag = m["source"] ?? ""
   if source_tag == "live" or source_tag == "live_harbor" then
     update_history(m)
@@ -399,16 +366,20 @@ end)
 
 radio = mksafe(radio)
 
-# Добавляем мягкий лимитер для защиты FLAC-контейнера от целочисленного клиппинга!
-# Он сработает ТОЛЬКО если autocue слишком сильно вытянет громкий пик.
+# Мягкий лимитер для защиты FLAC-контейнера от клиппинга
 radio = limit(attack=2.0, release=50.0, threshold=-0.2, radio)
+
+# ==============================================================================
+# 8. OUTPUT (RAW LOSSLESS FLAC → ICECAST)
+# ==============================================================================
 
 # ==============================================================================
 # 8. OUTPUT (RAW LOSSLESS FLAC → ICECAST → FFmpeg HLS)
 # ==============================================================================
 output.icecast(
+  id="icecast_out",
   %ffmpeg(
-    format="flac",  # ⬅️ ИЗМЕНЕНО: Отказываемся от ogg, используем чистый непрерывный flac
+    format="ogg",   # <--- ДОЛЖНО БЫТЬ OGG
     %audio(
         codec="flac",
         samplerate=44100,
@@ -416,7 +387,7 @@ output.icecast(
         compression_level=5
     )
   ),
-  host="127.0.0.1", port=8000, password=icecast_pass, mount="/stream_lossless.flac", # ⬅️ ИЗМЕНЕНО
+  host="127.0.0.1", port=8000, password=icecast_pass, mount="/stream_lossless.ogg", # <--- ДОЛЖНО БЫТЬ .ogg
   name="LOCAL FARTS", description="LOSSLESS FEED", url="https://localfarts.lol",
   send_icy_metadata=false,
   radio
