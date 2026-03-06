@@ -26,6 +26,7 @@ WorkingDirectory=/dev/shm/hls
 ExecStartPre=+/bin/mkdir -p /dev/shm/hls/high /dev/shm/hls/mid /dev/shm/hls/low
 ExecStartPre=+/bin/chown -R www-data:www-data /dev/shm/hls
 ExecStartPre=+/bin/sh -c 'find /dev/shm/hls -type f -delete'
+ExecStartPost=+/bin/ln -sf /srv/radio/master.m3u8 /dev/shm/hls/master.m3u8
 
 ExecStart=/bin/bash -c 'exec /usr/bin/ffmpeg -nostdin -hide_banner -loglevel warning \
   -rw_timeout 15000000 \
