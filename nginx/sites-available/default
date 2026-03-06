@@ -3,7 +3,6 @@ server {
     listen      [::]:80; 
     server_name localfarts.lol www.localfarts.lol; 
 
-    # Принудительный редирект на HTTPS 
     return 301 https://$host$request_uri; 
 } 
 
@@ -15,7 +14,7 @@ server {
     root        /var/www/html; 
     index       index.html; 
 
-    # --- SSL Сертификаты --- 
+    # --- SSL --- 
     ssl_certificate         /etc/letsencrypt/live/localfarts.lol/fullchain.pem; 
     ssl_certificate_key     /etc/letsencrypt/live/localfarts.lol/privkey.pem; 
     include                 /etc/letsencrypt/options-ssl-nginx.conf; 
@@ -35,13 +34,25 @@ server {
     tcp_nodelay         on; 
 
     # ============================================================================== 
-    # 1. HLS СТРИМИНГ (ИЗ RAM-ДИСКА /dev/shm) 
+    # 1. HLS СТРИМИНГ
     # ============================================================================== 
+    
+    # Master playlist — генерируется Nginx из памяти, без файла на диске.
+    # FFmpeg не создаёт master.m3u8 с паттерном %v/, а delete_segments
+    # удаляет любой вручную созданный файл. Поэтому отдаём inline.
+    location = /hls/master.m3u8 {
+        default_type application/vnd.apple.mpegurl;
+        add_header Access-Control-Allow-Origin   "*" always;
+        add_header Access-Control-Allow-Methods  "GET, HEAD, OPTIONS" always;
+        add_header Cache-Control "no-cache, no-store, must-revalidate, max-age=0" always;
+        return 200 '#EXTM3U\n#EXT-X-VERSION:7\n\n#EXT-X-STREAM-INF:BANDWIDTH=256000,CODECS="mp4a.40.2",NAME="high"\nhigh/live.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=192000,CODECS="mp4a.40.2",NAME="mid"\nmid/live.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2",NAME="low"\nlow/live.m3u8\n';
+    }
+
+    # Сегменты и плейлисты потоков — из RAM-диска
     location ^~ /hls/ { 
         auth_basic      off; 
-        root /dev/shm; 
+        root            /dev/shm; 
         
-        # Отдельный лог HLS, чтобы не зашумлять общий access.log 
         access_log      /var/log/nginx/hls_access.log; 
         log_not_found   off; 
 
@@ -50,7 +61,7 @@ server {
             video/mp2t                     ts; 
             audio/aac                      aac; 
             video/mp4                      mp4; 
-            video/iso.segment              m4s;  # <--- ВОТ ЗДЕСЬ ИСПРАВЛЕНО
+            video/iso.segment              m4s;
         }
         default_type application/octet-stream; 
 
@@ -69,30 +80,29 @@ server {
             return 204; 
         } 
 
-        # Плейлисты должны быть всегда свежими (дублируем CORS заголовки)
-        if ($request_filename ~* \.m3u8$) { 
-            add_header Cache-Control                 "no-cache, no-store, must-revalidate, max-age=0" always; 
-            add_header Pragma                        "no-cache"                    always; 
-            add_header Expires                       "0"                           always; 
-            add_header Access-Control-Allow-Origin   "*"                           always; 
-            add_header Access-Control-Allow-Methods  "GET, HEAD, OPTIONS"          always; 
-            add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always; 
-        } 
+        # Плейлисты — всегда свежие
+        location ~* \.m3u8$ {
+            add_header Cache-Control                 "no-cache, no-store, must-revalidate, max-age=0" always;
+            add_header Pragma                        "no-cache"                    always;
+            add_header Expires                       "0"                           always;
+            add_header Access-Control-Allow-Origin   "*"                           always;
+            add_header Access-Control-Allow-Methods  "GET, HEAD, OPTIONS"          always;
+            add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always;
+        }
 
-        # fMP4 сегменты (.m4s) и init-сегменты (.mp4) неизменны — кэшируем 
-        if ($request_filename ~* \.(ts|m4s|aac|mp4)$) { 
-            add_header Cache-Control                 "public, max-age=3600, immutable" always; 
-            add_header Access-Control-Allow-Origin   "*"                           always; 
-            add_header Access-Control-Allow-Methods  "GET, HEAD, OPTIONS"          always; 
-            add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always; 
-        } 
+        # Сегменты (.m4s, .mp4) неизменны — агрессивный кэш
+        location ~* \.(m4s|mp4|ts|aac)$ {
+            add_header Cache-Control                 "public, max-age=3600, immutable" always;
+            add_header Access-Control-Allow-Origin   "*"                           always;
+            add_header Access-Control-Allow-Methods  "GET, HEAD, OPTIONS"          always;
+            add_header Access-Control-Expose-Headers "Date, Content-Length, Content-Range" always;
+        }
     } 
 
     # ============================================================================== 
     # 2. МЕТАДАННЫЕ И РАДИО-ПАНЕЛЬ
     # ============================================================================== 
     
-    # --- JSON Данные ---
     location = /nowplaying.json { 
         auth_basic      off; 
         root            /srv/radio/radio_data; 
@@ -209,7 +219,7 @@ server {
         add_header X-Accel-Buffering "no"      always; 
     } 
 
-    # GoAccess real-time (127.0.0.1:7891)
+    # GoAccess real-time WebSocket
     location /ws-stats { 
         proxy_pass                  http://127.0.0.1:7891/; 
         proxy_http_version          1.1; 
@@ -276,7 +286,7 @@ server {
     # 5. СТАТИКА САЙТА И БЕЗОПАСНОСТЬ
     # ============================================================================== 
     
-    # Не отдаем скрытые файлы (.env, .git и т.д.) 
+    # Скрытые файлы (.env, .git)
     location ~ /\.(?!well-known).* { 
         deny all; 
     } 
@@ -286,14 +296,14 @@ server {
         try_files $uri $uri/ =404; 
     } 
 
-    # JS/CSS (отключаем кэш для быстрой доставки обновлений)
+    # JS/CSS — без кэша для быстрой доставки обновлений
     location ~* \.(css|js)$ { 
         expires     -1; 
         add_header  Cache-Control "no-cache, no-store, must-revalidate" always; 
         try_files   $uri =404; 
     } 
 
-    # Картинки и шрифты (агрессивное кэширование)
+    # Картинки и шрифты — агрессивное кэширование
     location ~* \.(jpg|jpeg|png|gif|ico|webp|svg|woff|woff2|ttf)$ { 
         expires     30d; 
         add_header  Cache-Control "public, max-age=2592000, immutable" always; 
