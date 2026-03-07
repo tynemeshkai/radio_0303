@@ -35,7 +35,7 @@ export const HLS_CONFIG = {
     debug: false, 
     enableWorker: true,
     capLevelToPlayerSize: false,
-    startLevel: 1,
+    startLevel: -1,
     maxBufferLength: 90,
     maxMaxBufferLength: 180,
     backBufferLength: 30,
