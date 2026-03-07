@@ -243,6 +243,7 @@ export function initPlayer() {
     const streamUrl = withCacheBust(CONFIG.hlsUrl);
     DOM.audio.setAttribute('playsinline', '');
     DOM.audio.setAttribute('webkit-playsinline', '');
+    DOM.audio.setAttribute('x-webkit-airplay', 'allow');
     try { loadStreamSource(streamUrl, "init"); } catch (e) { debugLine("initPlayer load failed", { error: e?.message }); }
 }
 
