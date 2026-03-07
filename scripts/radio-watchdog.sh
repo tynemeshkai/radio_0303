@@ -4,7 +4,7 @@ LOG="/var/log/radio_watchdog.log"
 LOCK="/run/radio_watchdog.lock"
 STATE_FILE="/run/radio_watchdog.failcount"
 FAIL_THRESHOLD=5
-STREAM_MOUNT="/stream_lossless.flac"
+STREAM_MOUNT="/stream_lossless.ogg"
 ADMIN_STATS_URL="http://127.0.0.1:8000/admin/stats"
 
 mkdir -p /run
