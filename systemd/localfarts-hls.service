@@ -58,7 +58,7 @@ ExecStart=/bin/bash -c 'exec /usr/bin/ffmpeg -nostdin -hide_banner -loglevel war
   -flags low_delay \
   -thread_queue_size 4096 \
   -i http://127.0.0.1:8000/stream_lossless.ogg \
-  -filter_complex "[0:a]aformat=sample_fmts=fltp,volume=-2dB,highpass=f=20:poles=2,equalizer=f=60:width_type=o:width=1:g=1.5,equalizer=f=350:width_type=o:width=1:g=-1.2,equalizer=f=3000:width_type=o:width=1:g=-1.5,equalizer=f=8500:width_type=o:width=1.2:g=-0.5,volume=2dB,alimiter=level_in=1:level_out=1:limit=0.891:attack=5:release=80:level=disabled,asplit=3[a1][a2][a3]" \
+  -filter_complex "[0:a]aformat=sample_fmts=fltp,volume=-2dB,highpass=f=20:poles=2,equalizer=f=85:width_type=o:width=1:g=1.5,equalizer=f=350:width_type=o:width=1:g=-1.2,equalizer=f=3000:width_type=o:width=1:g=-0.5,equalizer=f=8500:width_type=o:width=1.2:g=-0.5,volume=2dB,alimiter=level_in=1:level_out=1:limit=0.891:attack=5:release=80:level=disabled,asplit=3[a1][a2][a3]" \
   -map "[a1]" -c:a:0 aac -profile:a aac_low -b:a:0 256k \
   -map "[a2]" -c:a:1 aac -profile:a aac_low -b:a:1 192k \
   -map "[a3]" -c:a:2 aac -profile:a aac_low -b:a:2 128k \
