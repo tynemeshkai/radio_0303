@@ -316,7 +316,7 @@ async def api_queue_push(req: QueueRequest, auth: bool = Depends(verify_token)):
 # --- SKIP ---
 @app.post("/api/skip")
 async def api_skip(auth: bool = Depends(verify_token)):
-    result = await telnet_cmd("output.icecast.skip")
+    result = await telnet_cmd("icecast_out.skip")
     return {"status": "ok", "response": result}
 
 
