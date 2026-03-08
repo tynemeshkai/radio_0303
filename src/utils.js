@@ -95,13 +95,14 @@ export function getAlignedNowMs() {
 }
 
 export function getMetaDelayMs() {
-    let delayMs = CONFIG.delayMs;
-    if (state.hls && typeof state.hls.latency === "number" && Number.isFinite(state.hls.latency) && state.hls.latency > 0) {
-        delayMs = Math.round(state.hls.latency * 1000);
+    if (state.hls && typeof state.hls.latency === "number" && 
+        Number.isFinite(state.hls.latency) && state.hls.latency > 0) {
+        const cappedLatency = Math.min(state.hls.latency, 26) * 1000; // кэп 26 сек
+        const withSafety = cappedLatency + CONFIG.metaSafetyMs + (state.userSyncOffsetMs || 0);
+        return Math.max(CONFIG.metaMinDelayMs, Math.min(CONFIG.metaMaxDelayMs, withSafety));
     }
-    delayMs = Math.min(CONFIG.metaMaxDelayMs, Math.max(CONFIG.metaMinDelayMs, delayMs));
-    const withSafety = delayMs + CONFIG.metaSafetyMs + (state.userSyncOffsetMs || 0);
-    return Math.max(CONFIG.metaMinDelayMs, Math.min(CONFIG.metaMaxDelayMs + 15000, withSafety));
+    const withSafety = CONFIG.delayMs + CONFIG.metaSafetyMs + (state.userSyncOffsetMs || 0);
+    return Math.max(CONFIG.metaMinDelayMs, Math.min(CONFIG.metaMaxDelayMs, withSafety));
 }
 
 export function estimateClientPlayoutMs() {
