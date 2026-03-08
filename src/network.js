@@ -167,7 +167,13 @@ export async function fetchServerMeta(force = false) {
         state.serverTrackTitle = track;
         state.lastStatusTrack = track;
         state.lastStatusAt = getAlignedNowMs();
+
+        // nowplaying.json авторитетнее Icecast статуса — не перезаписываем если он свежий
+        const nowPlayingAge = getAlignedNowMs() - state.lastNowPlayingAt;
+        if (state.lastNowPlayingAt > 0 && nowPlayingAge < 60000) return;
+
         enqueueTrack(track, "status", { trackKey: `status:${track}` });
+
     } catch (e) {} finally {
         state.metaFetchInFlight = false;
         if (state.metaFetchQueued) {
