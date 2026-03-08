@@ -134,13 +134,22 @@ EOF
     NOW_UTC="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     NOW_MS="$(unix_ms_now)"
 
+    # Определяем artist/title ДО вызова write_history_json — он перезаписывает глобальные ARTIST/TITLE
+    split_artist_title "$TRACK_NAME"
+    HISTORY_TRACK_NAME="$TRACK_NAME"
+    if [[ "$ARTIST" == LIVE:* ]]; then
+        HISTORY_TRACK_NAME="$TITLE"
+    fi
+    CURRENT_ARTIST="$ARTIST"
+    CURRENT_TITLE="$TITLE"
+
     # history.txt (newest first, keep 20)
     printf "%s || %s\n" "$NOW_UTC" "$HISTORY_TRACK_NAME" > "$HISTORY_TMP"
     head -n 19 "$HISTORY_FILE" >> "$HISTORY_TMP"
     mv -f "$HISTORY_TMP" "$HISTORY_FILE"
     chmod 644 "$HISTORY_FILE"
 
-    # history.json (newest first, deterministic structure)
+    # history.json
     write_history_json "$NOW_UTC" "$NOW_MS"
 
     # sequence (monotonic)
@@ -153,17 +162,10 @@ EOF
     mv -f "$SEQ_TMP" "$SEQ_FILE"
     chmod 644 "$SEQ_FILE"
 
-    split_artist_title "$TRACK_NAME"
-    HISTORY_TRACK_NAME="$TRACK_NAME"
-        if [[ "$ARTIST" == LIVE:* ]]; then
-    HISTORY_TRACK_NAME="$TITLE"
-        fi
-
     TRACK_ESC="$(json_escape "$TRACK_NAME")"
-    ARTIST_ESC="$(json_escape "$ARTIST")"
-    TITLE_ESC="$(json_escape "$TITLE")"
+    ARTIST_ESC="$(json_escape "$CURRENT_ARTIST")"
+    TITLE_ESC="$(json_escape "$CURRENT_TITLE")"
 
-    # nowplaying.json (single source of truth for frontend)
     cat > "$NOWPLAYING_TMP" <<EOF
 {
   "sequence": $NEXT_SEQ,
@@ -179,10 +181,6 @@ EOF
     mv -f "$NOWPLAYING_TMP" "$NOWPLAYING_FILE"
     chmod 644 "$NOWPLAYING_FILE"
 
-    # ==============================================================================
-    # МГНОВЕННЫЙ PUSH (SSE) 
-    # ==============================================================================
-    # Дергаем микросервис, чтобы он сразу раздал новый nowplaying.json слушателям
     curl -s -X POST http://127.0.0.1:7890/internal/update > /dev/null || true
 
 ) 200>"$LOCK_FILE"
