@@ -258,7 +258,6 @@ def energy_crossfade(old, new) =
 
   if old_is_jingle or new_is_jingle then
     log("[CrossFade] Jingle detected → quick cut")
-    # Джингл: просто последовательно, без оверлапа
     sequence([
       fade.out(duration=0.3, old.source),
       fade.in(duration=0.3, new.source)
@@ -305,14 +304,20 @@ def energy_crossfade(old, new) =
   end
 end
 
-# override_duration=true — cross() берёт liq_cross_duration из метаданных Autocue
-# вместо глобального duration=5.0. Для треков без liq_cross_duration — fallback 4.0 сек.
-autodj = cross(
-  duration=4.0,
-  override_duration=true,
-  conservative=true,
-  autodj,
-  energy_crossfade
+autodj = cross(duration=4.0, energy_crossfade, autodj)
+
+def transition_to_live(old, new) =
+  add(normalize=false, [fade.initial(duration=1.0, new), fade.final(duration=3.0, old)])
+end
+
+def transition_to_autodj(old, new) =
+  add(normalize=false, [fade.initial(duration=3.0, new), fade.final(duration=2.0, old)])
+end
+
+radio = fallback(
+  track_sensitive=false,
+  transitions=[transition_to_live, transition_to_autodj],
+  [live, autodj]
 )
 
 # ==============================================================================
