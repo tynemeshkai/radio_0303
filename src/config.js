@@ -1,59 +1,82 @@
-export const IS_LOCAL_APP = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-export const BASE_URL = IS_LOCAL_APP ? 'https://localfarts.lol' : '';
-
-export const CONFIG = {
-    hlsUrl: `${BASE_URL}/hls/master.m3u8`,
-    fallbackStreamUrl: `${BASE_URL}/stream_lossless.ogg`,
-    nowPlayingUrl: `${BASE_URL}/nowplaying.json`,
-    statusUrl: `${BASE_URL}/status-json.xsl`,
-    historyJsonUrl: `${BASE_URL}/history.json`,
-    historyUrl: `${BASE_URL}/history.txt`,
-    
-    // ОСНОВНАЯ ПРАВКА: 19 секунд (3 чанка по 6 сек + 1 сек запаса)
-    delayMs: 19000, 
-    
-    metaMinDelayMs: 4000,
-    // Расширили максимальный лимит задержки до 40 сек под новые чанки
-    metaMaxDelayMs: 40000, 
-    metaSafetyMs: 1200,
-    
-    // Расширили время, после которого данные считаются протухшими
-    metaStatusStaleMs: 45000, 
-    metaForceSyncAfterMs: 65000,
-    
-    metaInterval: 10000,
-    nowPlayingIntervalMs: 5000,
-    nowPlayingStaleMs: 30000,
-    historyIntervalMs: 20000,
-    reloadCooldownMs: 5000
+// --- КЭШИРОВАННЫЕ ДОМ-ЭЛЕМЕНТЫ ---
+export const DOM = {
+    audio: document.getElementById('audio-stream'),
+    playBtn: document.getElementById('play-btn'),
+    muteBtn: document.getElementById('mute-btn'),
+    artistEl: document.getElementById('artist-name'),
+    titleEl: document.getElementById('track-name'),
+    historyListEl: document.getElementById('history-list'),
+    infoBtn: document.getElementById('info-btn'),
+    infoPopup: document.querySelector('.info-popup'),
+    // Новые элементы для Canvas:
+    eqContainer: document.querySelector('.equaliser'),
+    eqCanvas: document.getElementById('eq-canvas')
 };
 
-export const HLS_CONFIG = {
-    autoStartLoad: true, 
-    startPosition: -1, 
-    lowLatencyMode: false,
-    debug: false, 
-    enableWorker: true,
-    capLevelToPlayerSize: false,
-    startLevel: -1,
-    maxBufferLength: 90,
-    maxMaxBufferLength: 180,
-    backBufferLength: 30,
-    liveSyncDurationCount: 5,
-    liveMaxLatencyDurationCount: 12,
-    maxLiveSyncPlaybackRate: 1.0,
-    manifestLoadingTimeOut: 20000, 
-    manifestLoadingMaxRetry: 10,
-    fragLoadingTimeOut: 25000,
-    fragLoadingMaxRetry: 10,
-    levelLoadingMaxRetry: 5,
-    abrBandWidthFactor: 0.8,
-    abrBandWidthUpFactor: 0.6,
-    highBufferWatchdogPeriod: 2,
-    nudgeOffset: 0.1,
-    nudgeMaxRetry: 5,
-    maxBufferHole: 1.5,
+// Чтение настроек пользователя из браузера
+let storedSyncOffsetMs = 0;
+try {
+    const raw = window.localStorage ? window.localStorage.getItem("radio_sync_offset_ms") : null;
+    const num = Number(raw);
+    if (Number.isFinite(num)) {
+        storedSyncOffsetMs = Math.max(-15000, Math.min(15000, Math.round(num)));
+    }
+} catch (e) {}
+
+// --- ГЛОБАЛЬНОЕ СОСТОЯНИЕ ---
+export const state = {
+    isPlaying: false,
+    hls: null,
+    currentDisplayedTrack: "",
+    serverTrackTitle: "",
+    metaQueue: [],
+    lastPauseTime: 0,
+    isBusy: false,
+    metaFetchInFlight: false,
+    metaFetchQueued: false,
+    nowPlayingFetchInFlight: false,
+    nowPlayingFetchQueued: false,
+    historyFetchInFlight: false,
+    historyFetchQueued: false,
+    userPauseAt: 0,
+    userPauseReason: "",
+    ignoreNextPause: false,
+    shouldAutoResume: false,
+    wasInterrupted: false,
+    resumeInFlight: false,
+    pendingResume: false,
+    resumeReason: "",
+    pauseIgnoreUntil: 0,
+    resumeToken: 0,
+    resumeGraceUntil: 0,
+    lastStartAt: 0,
+    lastUserGestureAt: 0,
+    lastUiPauseAttemptAt: 0,
+    uiPauseLockUntil: 0,
+    pauseOverrideUntil: 0,
+    currentTrackSource: "",
+    currentTrackKey: "",
+    lastTrackAppliedAt: 0,
+    lastStatusTrack: "",
+    lastStatusAt: 0,
+    lastNowPlayingTrack: "",
+    lastNowPlayingAt: 0,
+    lastNowPlayingSeq: 0,
+    lastNowPlayingStartedAt: 0,
+    latestHistoryTrack: "",
+    latestHistoryKey: "",
+    latestHistoryAt: 0,
+    historyTimeline: [],
+    serverClockOffsetMs: 0,
+    userSyncOffsetMs: storedSyncOffsetMs
 };
 
-// Проверка включенного дебаггера в URL (?debug=1)
-export const DEBUG = /(?:\?|&)debug=1/.test(location.search);
+// Индикаторы падения сервера
+export const flags = {
+    serverIsDown: false,
+    broken: { icecast: false, hls: false }
+};
+
+export const DEBUG_STATE = { lines: [], max: 80, panel: null, lastTimeLog: 0 };
+// Глобальный доступ для дебага из консоли браузера
+if (typeof window !== 'undefined') window.__radio = { state, flags, DOM };
