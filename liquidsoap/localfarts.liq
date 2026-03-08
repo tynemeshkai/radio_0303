@@ -45,20 +45,15 @@ def dj_auth_func(args) =
   safe_user = string.replace(pattern="[^a-zA-Z0-9_]", fun (_) -> "", user)
   safe_addr = string.replace(pattern="[^a-zA-Z0-9.:]", fun (_) -> "", addr)
 
-  auth_data = "#{user}\n#{pass}\n#{addr}"
-  file.write(data=auth_data, "/tmp/dj_auth_input.tmp")
-
-  cmd_auth = "/usr/local/bin/dj_auth.py < /tmp/dj_auth_input.tmp 2>/dev/null"
-  result   = string.trim(process.read(cmd_auth))
-  
-  ignore(process.read("rm -f /tmp/dj_auth_input.tmp"))
+  cmd = "printf '%s\\n%s\\n%s\\n' '#{safe_user}' '#{pass}' '#{safe_addr}' | python3 /usr/local/bin/dj_auth.py"
+  result = string.trim(process.read(cmd))
 
   if result == "true" then
     current_dj_user := user
     print("[DJ Auth] ✅ #{safe_user} from #{safe_addr}")
     true
   else
-    print("[DJ Auth] ❌ #{safe_user} from #{safe_addr}")
+    print("[DJ Auth] ❌ #{safe_user} from #{safe_addr}: '#{result}'")
     false
   end
 end
@@ -211,7 +206,16 @@ def get_track_name(m) =
   source_tag = m["source"] ?? ""
 
   if source_tag == "live" then
-    title
+    # Включаем artist ("LIVE: DJ Name") чтобы он дошёл до nowplaying.json
+    if artist != "" and title != "" then
+      "#{artist} - #{title}"
+    elsif title != "" then
+      title
+    elsif artist != "" then
+      artist
+    else
+      "Live Session"
+    end
   elsif artist != "" and title != "" then
     "#{artist} - #{title}"
   elsif title != "" then
