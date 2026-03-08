@@ -135,7 +135,7 @@ EOF
     NOW_MS="$(unix_ms_now)"
 
     # history.txt (newest first, keep 20)
-    printf "%s || %s\n" "$NOW_UTC" "$TRACK_NAME" > "$HISTORY_TMP"
+    printf "%s || %s\n" "$NOW_UTC" "$HISTORY_TRACK_NAME" > "$HISTORY_TMP"
     head -n 19 "$HISTORY_FILE" >> "$HISTORY_TMP"
     mv -f "$HISTORY_TMP" "$HISTORY_FILE"
     chmod 644 "$HISTORY_FILE"
@@ -154,6 +154,10 @@ EOF
     chmod 644 "$SEQ_FILE"
 
     split_artist_title "$TRACK_NAME"
+    HISTORY_TRACK_NAME="$TRACK_NAME"
+        if [[ "$ARTIST" == LIVE:* ]]; then
+    HISTORY_TRACK_NAME="$TITLE"
+        fi
 
     TRACK_ESC="$(json_escape "$TRACK_NAME")"
     ARTIST_ESC="$(json_escape "$ARTIST")"
