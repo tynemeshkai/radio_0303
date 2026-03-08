@@ -78,3 +78,5 @@ export const flags = {
 };
 
 export const DEBUG_STATE = { lines: [], max: 80, panel: null, lastTimeLog: 0 };
+// Глобальный доступ для дебага из консоли браузера
+if (typeof window !== 'undefined') window.__radio = { state, flags, DOM };
