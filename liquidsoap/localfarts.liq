@@ -257,47 +257,46 @@ def energy_crossfade(old, new) =
   new_is_jingle = (new.metadata["is_jingle"] ?? "false") == "true"
 
   if old_is_jingle or new_is_jingle then
-    log("[CrossFade] Jingle detected → quick sequence")
-    sequence([fade.out(duration=0.5, old.source), fade.in(duration=0.3, new.source)])
+    log("[CrossFade] Jingle detected → quick cut")
+    # Джингл: просто последовательно, без оверлапа
+    sequence([
+      fade.out(duration=0.3, old.source),
+      fade.in(duration=0.3, new.source)
+    ])
   else
-    old_energy = 
+    old_energy =
       if old_amplify > 6.0 then "calm"
       elsif old_amplify < -2.0 then "hot"
       else "mid" end
-      
-    new_energy = 
+
+    new_energy =
       if new_amplify > 6.0 then "calm"
       elsif new_amplify < -2.0 then "hot"
       else "mid" end
 
-    log("[CrossFade] old=#{old_energy} (amplify=#{old_amplify} dB) → new=#{new_energy} (amplify=#{new_amplify} dB)")
+    log("[CrossFade] old=#{old_energy} (#{old_amplify} dB) → new=#{new_energy} (#{new_amplify} dB)")
 
     if old_energy == "calm" and new_energy == "calm" then
-      log("[CrossFade] calm→calm: long smooth crossfade")
       add(normalize=false, [
         fade.out(type="sin", duration=5.0, old.source),
         fade.in(type="sin", duration=4.0, new.source)
       ])
     elsif old_energy == "calm" and new_energy == "hot" then
-      log("[CrossFade] calm→hot: quick fade-out, hard in")
       add(normalize=false, [
         fade.out(type="exp", duration=1.5, old.source),
-        new.source
+        fade.in(type="exp", duration=0.5, new.source)
       ])
     elsif old_energy == "hot" and new_energy == "calm" then
-      log("[CrossFade] hot→calm: let old ring, gentle fade-in")
       add(normalize=false, [
         fade.out(type="sin", duration=2.5, old.source),
         fade.in(type="sin", duration=3.5, new.source)
       ])
     elsif old_energy == "hot" and new_energy == "hot" then
-      log("[CrossFade] hot→hot: short sharp crossfade")
       add(normalize=false, [
         fade.out(type="exp", duration=1.5, old.source),
         fade.in(type="exp", duration=1.0, new.source)
       ])
     else
-      log("[CrossFade] mixed energy → standard crossfade")
       add(normalize=false, [
         fade.out(type="sin", duration=3.0, old.source),
         fade.in(type="sin", duration=2.5, new.source)
@@ -306,20 +305,14 @@ def energy_crossfade(old, new) =
   end
 end
 
-autodj = cross(duration=5.0, energy_crossfade, autodj)
-
-def transition_to_live(old, new) =
-  add(normalize=false, [fade.initial(duration=1.0, new), fade.final(duration=3.0, old)])
-end
-
-def transition_to_autodj(old, new) =
-  add(normalize=false, [fade.initial(duration=3.0, new), fade.final(duration=2.0, old)])
-end
-
-radio = fallback(
-  track_sensitive=false,
-  transitions=[transition_to_live, transition_to_autodj],
-  [live, autodj]
+# override_duration=true — cross() берёт liq_cross_duration из метаданных Autocue
+# вместо глобального duration=5.0. Для треков без liq_cross_duration — fallback 4.0 сек.
+autodj = cross(
+  duration=4.0,
+  override_duration=true,
+  conservative=true,
+  autodj,
+  energy_crossfade
 )
 
 # ==============================================================================
