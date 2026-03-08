@@ -255,6 +255,9 @@ export async function fetchHistory() {
 }
 
 function syncTrackToHistoryTimeline(force = false) {
+    if (!force && document.hidden) return;
+    if (state.historyFetchInFlight) return;
+    if (state.lastNowPlayingTrack && state.lastNowPlayingTrack.startsWith("LIVE:")) return;
     if (!force && (!state.isPlaying || DOM.audio.paused)) return;
     if (!state.historyTimeline.length) return;
 
@@ -279,6 +282,9 @@ function syncTrackToHistoryTimeline(force = false) {
 }
 
 function maybeForceTrackSyncFromHistory() {
+    if (state.historyFetchInFlight) return;
+    if (document.hidden) return;
+    if (state.lastNowPlayingTrack && state.lastNowPlayingTrack.startsWith("LIVE:")) return;
     // ЗАЩИТА 2: Блокируем форсирование, пока качается история
     if (state.historyFetchInFlight) return;
 
