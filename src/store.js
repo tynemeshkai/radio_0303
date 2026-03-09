@@ -50,6 +50,7 @@ export const state = {
     resumeToken: 0,
     resumeGraceUntil: 0,
     lastStartAt: 0,
+    isLive: false,
     lastUserGestureAt: 0,
     lastUiPauseAttemptAt: 0,
     uiPauseLockUntil: 0,
