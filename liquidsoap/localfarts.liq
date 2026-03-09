@@ -72,18 +72,19 @@ def dj_on_connect(_headers) =
   current_dj_name := dj_name
   print("[DJ] 🎧 #{dj_name} (#{dj_user}) connected, limit: #{max_minutes} min")
 
+  # Сразу пишем в nowplaying.json чтобы фронт знал что идёт лайв
+  live_track = if dj_name != "" then "LIVE: #{dj_name} - Live Session" else "LIVE: LOCAL FARTS - Live Session" end
+  ignore(process.run("/usr/local/bin/write_history.sh " ^ "'" ^ string.replace(pattern="'", fun(_) -> "'\\''", live_track) ^ "'"))
+
   if max_minutes > 0 then
     max_seconds = float(max_minutes * 60)
 
     thread.run(delay=max_seconds, fun () -> begin
       if not dj_kick_cancelled() then
         print("[DJ] ⏰ Auto-kick #{dj_user} after #{max_minutes} min")
-
         ignore(process.read("/usr/local/bin/dj_session.py disconnect 2>/dev/null"))
-        
         log_cmd = "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] AUTO-KICK #{dj_user} (exceeded #{max_minutes} min)\" >> /var/log/localfarts/dj.log"
         ignore(process.read(log_cmd))
-
         ignore(process.read("echo 'live_harbor.stop' | nc -w 2 127.0.0.1 1234 2>/dev/null"))
       end
     end)
@@ -247,7 +248,6 @@ def update_history(m) =
 end
 
 autodj.on_track(synchronous=false, update_history)
-autodj.on_metadata(synchronous=false, update_history)
 
 # ==============================================================================
 # 5. ENERGY-BASED SMART CROSSFADE
