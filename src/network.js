@@ -47,6 +47,7 @@ function parseNowPlayingPayload(payload) {
     const title = normalizeTrackTitle(payload.title || "");
     const song = normalizeTrackTitle(payload.song || "");
     const directTrack = normalizeTrackTitle(payload.track || payload.full_title || payload.now_playing || "");
+    const isLive = payload.is_live === true;
 
     let track = "";
     if (artist && title && !isGenericTrackTitle(title)) track = `${artist} - ${title}`;
@@ -58,7 +59,7 @@ function parseNowPlayingPayload(payload) {
 
     const startedAtMs = parseNowPlayingTimestamp(payload.started_at_unix_ms || payload.started_at_ms || payload.started_ms || payload.started_at || payload.started_at_utc);
     const sequence = Number.isFinite(Number(payload.sequence)) ? Number(payload.sequence) : 0;
-    return { track, startedAtMs, sequence };
+    return { track, startedAtMs, sequence, isLive };
 }
 
 function makeTrackKey(trackTitle, startedAtMs = 0, sequence = 0) {
@@ -116,6 +117,7 @@ export async function fetchNowPlaying(force = false) {
         const now = getAlignedNowMs();
         state.lastNowPlayingAt = now;
         state.lastNowPlayingTrack = parsed.track;
+        state.isLive = parsed.isLive === true;
         if (parsed.sequence > 0) state.lastNowPlayingSeq = parsed.sequence;
         if (parsed.startedAtMs > 0) state.lastNowPlayingStartedAt = parsed.startedAtMs;
 
@@ -257,17 +259,9 @@ export async function fetchHistory() {
 function syncTrackToHistoryTimeline(force = false) {
     if (!force && document.hidden) return;
     if (state.historyFetchInFlight) return;
-    if (state.lastNowPlayingTrack && state.lastNowPlayingTrack.startsWith("LIVE:")) return;
+    if (state.isLive) return;
     if (!force && (!state.isPlaying || DOM.audio.paused)) return;
     if (!state.historyTimeline.length) return;
-
-    // На заблокированном экране estimateClientPlayoutMs() работает неточно
-    // (getStartDate() и currentTime рассинхронизируются).
-    // SSE + nowplaying polling достаточно для обновления трека.
-    if (!force && document.hidden) return;
-
-    // ЗАЩИТА 1: Если свежая история прямо сейчас качается, запрещаем откатывать UI назад
-    if (state.historyFetchInFlight) return;
 
     const playheadMs = estimateClientPlayoutMs();
 
@@ -284,12 +278,7 @@ function syncTrackToHistoryTimeline(force = false) {
 function maybeForceTrackSyncFromHistory() {
     if (state.historyFetchInFlight) return;
     if (document.hidden) return;
-    if (state.lastNowPlayingTrack && state.lastNowPlayingTrack.startsWith("LIVE:")) return;
-    // ЗАЩИТА 2: Блокируем форсирование, пока качается история
-    if (state.historyFetchInFlight) return;
-
-    // На заблокированном экране не форсируем — обновления идут через очередь
-    if (document.hidden) return;
+    if (state.isLive) return;
 
     if (!state.latestHistoryTrack || !state.latestHistoryKey) return;
     if (state.latestHistoryKey === state.currentTrackKey) return;
