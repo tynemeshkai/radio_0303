@@ -172,6 +172,7 @@ EOF
   "track": "$TRACK_ESC",
   "artist": "$ARTIST_ESC",
   "title": "$TITLE_ESC",
+  "is_live": $(if [[ "$CURRENT_ARTIST" == LIVE:* ]]; then echo "true"; else echo "false"; fi),
   "started_at_utc": "$NOW_UTC",
   "started_at_unix_ms": $NOW_MS,
   "updated_at_utc": "$NOW_UTC",
