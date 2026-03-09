@@ -36,6 +36,7 @@
             padding: 0;
             width: 100%;
             height: 100%;
+            overflow: hidden;
             overflow: clip; 
             overscroll-behavior: none;
             background: hsl(0, 73%, 61%);
@@ -651,7 +652,7 @@
         }
 
         @media (prefers-reduced-motion: reduce) {
-            *:not(html):not(body) {
+            *:not(html):not(body):not(.is-scrolling) {
                 animation-duration: 0.01ms !important;
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
