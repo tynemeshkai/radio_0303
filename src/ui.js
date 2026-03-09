@@ -4,45 +4,33 @@ import { Visualizer } from './visualizer.js';
 
 // --- ЕДИНЫЙ ДИРИЖЕР БЕГУЩИХ СТРОК (СИНХРОННЫЙ) ---
 export function syncAllMarquees() {
-    // Собираем все текстовые блоки, которые потенциально могут скроллиться
     const els = Array.from(document.querySelectorAll('#artist-name, #track-name, .history-track-name'));
 
-    // 1. Сбрасываем все анимации, чтобы обнулить их тайминги
     els.forEach(el => {
         el.classList.remove('is-scrolling');
         el.style.transform = 'translateX(0)';
     });
 
-    // Ждем один кадр отрисовки, чтобы браузер применил сброс
     requestAnimationFrame(() => {
         let maxDuration = 0;
         const scrollingEls = [];
 
-        // 2. Измеряем каждый элемент
         els.forEach(el => {
-            const parent = el.parentElement;
-            if (!parent) return;
+            const container = el.closest('.song, .history li') || el.parentElement;
+            if (!container) return;
 
-            // Если текст не влезает в контейнер
-            if (el.scrollWidth > parent.clientWidth + 2) {
-                const scrollDistance = parent.clientWidth - el.scrollWidth - 15;
-                // Считаем идеальное время для этого конкретного куска текста (скорость 25px/сек)
+            if (el.scrollWidth > container.clientWidth + 2) {
+                const scrollDistance = container.clientWidth - el.scrollWidth - 15;
                 const neededDuration = Math.max(6, Math.abs(scrollDistance) / 25);
-
-                // Запоминаем самое большое время среди ВСЕХ строк
                 maxDuration = Math.max(maxDuration, neededDuration);
-
                 scrollingEls.push({ el, dist: scrollDistance });
             }
         });
 
         if (scrollingEls.length === 0) return;
 
-        // 3. Форсируем перерисовку (Reflow) браузера.
-        // Это магический трюк, заставляющий браузер применить анимацию с нуля прямо сейчас
         void document.body.offsetWidth;
 
-        // 4. Запускаем все анимации ОДНОВРЕМЕННО с ОДИНАКОВЫМ временем
         scrollingEls.forEach(item => {
             item.el.style.setProperty('--scroll-dist', `${item.dist}px`);
             item.el.style.setProperty('--scroll-duration', `${maxDuration}s`);
